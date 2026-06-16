@@ -1,4 +1,4 @@
-# autodetect
+# octopack
 
 **Smart framework detection & Dockerfile generation** — zero dependencies, pure Python stdlib.
 
@@ -16,23 +16,23 @@ that produces standard, human-readable Dockerfiles.
 - **Multi-stage Dockerfiles**: lean production images with Caddy (static sites),
   node:alpine (SSR/servers), python:3.11-slim, golang:alpine, etc.
 - **Zero deps**: uses only Python standard library — no pip install required
-- **CLI & library**: use as `python -m autodetect` or `import autodetect`
+- **CLI & library**: use as `python -m octopack` or `import octopack`
 
 ## Installation
 
 ### From source
 
 ```bash
-git clone https://github.com/your-username/autodetect.git
-cd autodetect
+git clone https://github.com/imadeddine/octopack.git
+cd octopack
 pip install -e .
 ```
 
 ### Or just run without installing
 
 ```bash
-cd /path/to/autodetect
-python -m autodetect /path/to/project
+cd /path/to/octopack
+python -m octopack /path/to/project
 ```
 
 ## Usage
@@ -41,26 +41,26 @@ python -m autodetect /path/to/project
 
 ```bash
 # Basic detection + Dockerfile to stdout
-python -m autodetect /path/to/my-project
+python -m octopack /path/to/my-project
 
 # Write Dockerfile to file
-python -m autodetect /path/to/my-project --output Dockerfile
+python -m octopack /path/to/my-project --output Dockerfile
 
 # JSON output (for CI/CD pipelines)
-python -m autodetect /path/to/my-project --json
+python -m octopack /path/to/my-project --json
 
 # Explicit framework (skip auto-detection)
-python -m autodetect /path/to/my-project --framework nextjs
+python -m octopack /path/to/my-project --framework nextjs
 
 # Quiet mode (Dockerfile only, no stderr)
-python -m autodetect /path/to/my-project --quiet
+python -m octopack /path/to/my-project --quiet
 ```
 
 ### As a library
 
 ```python
-from autodetect.detect import detect_framework
-from autodetect.dockerfile import generate_dockerfile
+from octopack.detect import detect_framework
+from octopack.dockerfile import generate_dockerfile
 
 # Detect
 detection = detect_framework("/path/to/my-project")
