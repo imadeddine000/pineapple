@@ -1,12 +1,12 @@
-![octopack logo](./octopack.png)
+![pineapple logo](./octopack.png)
 
-# octopack
+# 🍍 pineapple
 
-**Smart framework detection & Dockerfile generation** — zero dependencies, pure Python stdlib.
+**Smart framework detection, Dockerfile generation & container builds** — zero dependencies, pure Python stdlib.
 
 Scans any project directory, detects the framework and language, and generates a
 production-ready **multi-stage Dockerfile**. A lightweight alternative to nixpacks
-that produces standard, human-readable Dockerfiles.
+that produces standard, human-readable Dockerfiles — and can even build them for you.
 
 ## Features
 
@@ -17,24 +17,39 @@ that produces standard, human-readable Dockerfiles.
   correct install commands (with pnpm auto-install in the container!)
 - **Multi-stage Dockerfiles**: lean production images with Caddy (static sites),
   node:alpine (SSR/servers), python:3.11-slim, golang:alpine, etc.
+- **One-command build**: add `--build` / `-b` to automatically build the container
+  image after generating the Dockerfile
+- **Docker verification**: `pineapple verify docker` checks that Docker is installed
+  and the daemon is accessible, with helpful error messages
 - **Zero deps**: uses only Python standard library — no pip install required
-- **CLI & library**: use as `python -m octopack` or `import octopack`
+- **CLI & library**: use as `python -m pineapple` or `import pineapple`
 
 ## Installation
 
-### From source
+### From source (pip)
 
 ```bash
-git clone https://github.com/imadeddine/octopack.git
-cd octopack
+git clone https://github.com/your-username/pineapple.git
+cd pineapple
 pip install -e .
+```
+
+### Debian package (.deb)
+
+```bash
+# Build the .deb package
+sudo apt install devscripts debhelper dh-python python3-all python3-setuptools
+dpkg-buildpackage -us -uc -b
+
+# Install it
+sudo dpkg -i ../pineapple_1.0.0-1_all.deb
 ```
 
 ### Or just run without installing
 
 ```bash
-cd /path/to/octopack
-python -m octopack /path/to/project
+cd /path/to/pineapple
+python -m pineapple /path/to/project
 ```
 
 ## Usage
@@ -43,26 +58,43 @@ python -m octopack /path/to/project
 
 ```bash
 # Basic detection + Dockerfile to stdout
-python -m octopack /path/to/my-project
+pineapple ./my-project
 
 # Write Dockerfile to file
-python -m octopack /path/to/my-project --output Dockerfile
+pineapple generate ./my-project --output Dockerfile
+
+# Aliases work too
+pineapple gen ./my-project -o Dockerfile
+pineapple g ./my-project -o Dockerfile
+
+# Detect, generate & build in one command
+pineapple ./my-project --build
+
+# Custom image tag
+pineapple ./my-project --build --tag myapp:v1
 
 # JSON output (for CI/CD pipelines)
-python -m octopack /path/to/my-project --json
+pineapple ./my-project --json
 
 # Explicit framework (skip auto-detection)
-python -m octopack /path/to/my-project --framework nextjs
+pineapple ./my-project --framework nextjs
+
+# Verify Docker is available
+pineapple verify docker
 
 # Quiet mode (Dockerfile only, no stderr)
-python -m octopack /path/to/my-project --quiet
+pineapple ./my-project --quiet --output Dockerfile
+
+# Version info
+pineapple --version
 ```
 
 ### As a library
 
 ```python
-from octopack.detect import detect_framework
-from octopack.dockerfile import generate_dockerfile
+from pineapple.detect import detect_framework
+from pineapple.dockerfile import generate_dockerfile
+from pineapple.builder import build_image
 
 # Detect
 detection = detect_framework("/path/to/my-project")
@@ -73,6 +105,9 @@ print(detection["port"])       # e.g. 3000
 # Generate Dockerfile
 dockerfile = generate_dockerfile(detection, build_context="/path/to/my-project")
 print(dockerfile)
+
+# Build the image
+build_image("/path/to/my-project", tag="myapp:latest")
 ```
 
 ## Supported frameworks
@@ -96,6 +131,7 @@ print(dockerfile)
 3. **Detect** the package manager by checking for lock files (`pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`)
 4. **Enrich** with install/build/start commands tailored to the framework
 5. **Generate** a production-ready multi-stage Dockerfile
+6. **Build** (optional) — run `docker build` to create the container image
 
 ## License
 
