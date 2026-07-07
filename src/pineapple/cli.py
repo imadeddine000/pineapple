@@ -2,13 +2,15 @@
 Pineapple CLI — Smart framework detection, Dockerfile generation & container builds.
 
 Usage:
-    pineapple /path/to/project                    Detect & print Dockerfile
-    pineapple generate /path/to/project --build    Detect, generate & build
-    pineapple verify docker                        Check Docker availability
-    pineapple --version                            Show version
-    pineapple --help                               Show this help
+    pineapple                           Scan ., generate & write Dockerfile
+    pineapple ./project                  Scan ./project, generate & write Dockerfile
+    pineapple ./project --build          Scan, generate & build image
+    pineapple ./project --quiet          Print Dockerfile to stdout (for piping)
+    pineapple --json                     Print detection as JSON
+    pineapple verify docker              Check Docker availability
+    pineapple --version                  Show version
+    pineapple --help                     Show this help
 """
-
 
 import argparse
 import json
@@ -21,70 +23,136 @@ from pineapple.dockerfile import generate_dockerfile
 from pineapple.builder import build_image, check_docker
 
 
-# ── Subcommand handlers ───────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+def _info(message: str, *args: object) -> None:
+    """Print an info message to stderr."""
+    if args:
+        message = message % args
+    print(f"  {message}", file=sys.stderr)
+
+
+def _ok(message: str, *args: object) -> None:
+    """Print a success message to stderr."""
+    if args:
+        message = message % args
+    print(f"  ✓ {message}", file=sys.stderr)
+
+
+def _warn(message: str, *args: object) -> None:
+    """Print a warning message to stderr."""
+    if args:
+        message = message % args
+    print(f"  ⚠ {message}", file=sys.stderr)
+
+
+def _err(message: str, *args: object) -> None:
+    """Print an error message to stderr."""
+    if args:
+        message = message % args
+    print(f"  ✗ {message}", file=sys.stderr)
+
+
+# ── Subcommand handlers ──────────────────────────────────────────────────
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
     """Handle the ``generate`` subcommand."""
-    project_dir = os.path.abspath(args.project_dir)
+    # Use cwd if no project dir given
+    raw_dir = args.project_dir or "."
+    project_dir = os.path.abspath(raw_dir)
+
     if not os.path.isdir(project_dir):
-        print(f"Error: '{args.project_dir}' is not a directory", file=sys.stderr)
+        _err("'%s' is not a directory", raw_dir)
         return 1
 
-    # ── Detect ────────────────────────────────────────────────
-    detection = detect_framework(project_dir, user_framework=args.framework)
+    quiet = args.quiet
 
-    if detection["framework"] == "unknown" and not args.quiet:
-        print(
-            f"Warning: could not detect any known framework in '{project_dir}'",
-            file=sys.stderr,
-        )
+    # ── Detect ──────────────────────────────────────────────────────────
+    if not quiet and not args.json:
+        _info("Scanning %s ...", project_dir)
+
+    detection = detect_framework(project_dir, user_framework=args.framework)
+    fw = detection.get("framework", "unknown")
+    fw_type = detection.get("type", "unknown")
+
+    if fw == "unknown" and not args.json:
+        if not quiet:
+            _warn("Could not detect any known framework in '%s'", project_dir)
+            _info("Generating fallback static Dockerfile")
+    elif not quiet and not args.json:
+        _info("Detected: %s (%s)", fw, fw_type)
 
     if args.json:
-        # ── JSON output ────────────────────────────────────────
         output = json.dumps(detection, indent=2, default=str)
         if args.output:
             with open(args.output, "w") as f:
                 f.write(output + "\n")
-            if not args.quiet:
-                print(f"Detection written to {args.output}")
+            if not quiet:
+                _ok("Detection written to %s", args.output)
         else:
             print(output)
         return 0
 
-    # ── Generate Dockerfile ──────────────────────────────────
+    # ── Generate Dockerfile ────────────────────────────────────────────
+    if not quiet:
+        _info("Generating Dockerfile ...")
+
     dockerfile = generate_dockerfile(detection, build_context=project_dir)
 
     # Determine output path
+    # Default: write to Dockerfile in project dir
+    # --quiet flag: print to stdout (for piping)
+    # -o flag: write to specified path
     output_path = args.output
-    if args.build and output_path is None:
-        # When building, write to project dir by default
-        output_path = os.path.join(project_dir, "Dockerfile")
 
-    if output_path:
+    if quiet and output_path is None:
+        # Quiet mode with no -o: stdout (old default, for piping)
+        print(dockerfile, end="")
+        write_target = None
+    elif output_path is not None:
+        # Explicit -o path
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         with open(output_path, "w") as f:
             f.write(dockerfile)
-        if not args.quiet:
-            print(f"Dockerfile written to {output_path}", file=sys.stderr)
-            if detection["framework"] != "unknown":
-                print(
-                    f"Detected: {detection['framework']} ({detection['type']})",
-                    file=sys.stderr,
-                )
+        write_target = output_path
     else:
-        # Print to stdout — Dockerfile only
-        print(dockerfile, end="")
+        # Default: write to project_dir/Dockerfile
+        output_path = os.path.join(project_dir, "Dockerfile")
+        with open(output_path, "w") as f:
+            f.write(dockerfile)
+        write_target = output_path
 
-    # ── Build if requested ────────────────────────────────────
+    if write_target and not quiet:
+        # Show a clean path: relative if inside cwd, absolute otherwise
+        try:
+            rel = os.path.relpath(write_target, os.getcwd())
+            if rel.startswith(".."):
+                rel = os.path.abspath(write_target)
+        except ValueError:
+            rel = os.path.abspath(write_target)
+        _ok("Dockerfile written to %s", rel)
+
+    # ── Build if requested ──────────────────────────────────────────────
     if args.build:
+        if write_target is None:
+            # In quiet+stdout mode, write to project dir first for build
+            write_target = os.path.join(project_dir, "Dockerfile")
+            with open(write_target, "w") as f:
+                f.write(dockerfile)
+
         builder = args.builder or "docker"
         tag = args.tag or f"{os.path.basename(project_dir)}:latest"
+
+        if not quiet:
+            print(file=sys.stderr)  # blank line before build section
+
         return build_image(
             project_dir=project_dir,
             tag=tag,
             builder=builder,
-            dockerfile_path=output_path,
-            quiet=args.quiet,
+            dockerfile_path=write_target,
+            quiet=quiet,
         )
 
     return 0
@@ -95,17 +163,17 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if args.tool == "docker":
         result = check_docker()
         if result == 0:
-            print("✓ Docker is installed and the daemon is accessible.")
+            print("  ✓ Docker is installed and the daemon is accessible.")
         return result
     elif args.tool == "podman":
-        print("Podman support is coming in a future release.", file=sys.stderr)
+        _err("Podman support is coming in a future release.")
         return 1
     else:
-        print(f"Unknown tool: {args.tool}", file=sys.stderr)
+        _err("Unknown tool: %s", args.tool)
         return 1
 
 
-# ── Parser construction ───────────────────────────────────────
+# ── Parser construction ──────────────────────────────────────────────────
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -116,12 +184,13 @@ def build_parser() -> argparse.ArgumentParser:
         "Scans any project directory, detects the framework and language, "
         "and generates a production-ready Dockerfile — zero deps, pure Python.",
         epilog="Examples:\n"
-        "  pineapple ./my-project                Detect & print Dockerfile\n"
-        "  pineapple gen ./my-project -o df      Write Dockerfile to 'df'\n"
-        "  pineapple g ./my-project --build      Generate + build image\n"
-        "  pineapple ./my-project -b -t v1       Generate + build with tag\n"
-        "  pineapple verify docker               Check Docker availability\n"
-        "  pineapple --version                   Show version",
+        "  pineapple                          Scan ., write Dockerfile\n"
+        "  pineapple ./project                Scan project, write Dockerfile\n"
+        "  pineapple ./project --build        Generate + build image\n"
+        "  pineapple --quiet                  Print Dockerfile to stdout\n"
+        "  pineapple --json                   Detection as JSON\n"
+        "  pineapple verify docker            Check Docker availability\n"
+        "  pineapple --version                Show version",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -133,25 +202,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", metavar="")
 
-    # ── generate subcommand ─────────────────────────────────────
+    # ── generate subcommand ────────────────────────────────────────────
     gen_parser = subparsers.add_parser(
         "generate", aliases=["gen", "g"],
         help="Detect framework & generate a Dockerfile (default command)",
         description="Detect project framework and generate a production-ready Dockerfile.",
         epilog="Examples:\n"
-        "  pineapple generate ./my-project\n"
-        "  pineapple gen ./my-project -o Dockerfile\n"
-        "  pineapple g ./my-project --build --tag myapp:v1",
+        "  pineapple generate                 Scan ., write Dockerfile\n"
+        "  pineapple gen ./project -o df     Write to custom path\n"
+        "  pineapple g ./project --build     Generate + build image",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     gen_parser.add_argument(
-        "project_dir",
-        help="Path to the project directory to scan",
+        "project_dir", nargs="?", default=".",
+        help="Path to the project directory (default: current directory)",
     )
     gen_parser.add_argument(
         "--output", "-o",
         default=None,
-        help="Write Dockerfile to this path instead of stdout",
+        help="Write Dockerfile to this path (default: <project>/Dockerfile)",
     )
     gen_parser.add_argument(
         "--json", "-j",
@@ -166,7 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen_parser.add_argument(
         "--quiet", "-q",
         action="store_true",
-        help="Suppress info messages, output only the Dockerfile",
+        help="Print Dockerfile to stdout instead of writing to a file (for piping)",
     )
     gen_parser.add_argument(
         "--build", "-b",
@@ -186,7 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gen_parser.set_defaults(func=cmd_generate)
 
-    # ── verify subcommand ───────────────────────────────────────
+    # ── verify subcommand ──────────────────────────────────────────────
     verify_parser = subparsers.add_parser(
         "verify",
         help="Check if a container tool (docker/podman) is available",
@@ -206,15 +275,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-# ── Main entry point ──────────────────────────────────────────
+# ── Main entry point ─────────────────────────────────────────────────────
 
 
 def main(argv: list[str] | None = None) -> int:
     """
     Main entry point.
 
-    If no subcommand is given but positional arguments are present,
-    ``generate`` is assumed (so ``pineapple /path`` works as shorthand).
+    If no subcommand is given, ``generate`` is assumed.
+    If no project directory is given, the current directory is used.
     """
     parser = build_parser()
 
@@ -223,28 +292,17 @@ def main(argv: list[str] | None = None) -> int:
 
     # If the first argument doesn't look like a subcommand or flag,
     # treat it as a project directory and prepend "generate"
-    if argv and not argv[0].startswith("-"):
+    if argv:
         first = argv[0]
         subcommands = {"generate", "gen", "g", "verify"}
-        if first not in subcommands:
+        if not first.startswith("-") and first not in subcommands:
             argv = ["generate"] + list(argv)
 
-    # First pass: try parsing as-is
     args = parser.parse_args(argv)
 
-    # If no subcommand was matched and we have positional-like arguments,
-    # prepend "generate" and re-parse
-    if args.command is None and argv:
-        # Only do this if the first arg isn't a flag
-        first = argv[0]
-        if not first.startswith("-"):
-            new_argv = ["generate"] + list(argv)
-            args = parser.parse_args(new_argv)
-
     if args.command is None:
-        # Still no subcommand — show help
-        parser.print_help()
-        return 1
+        # No subcommand — default to "generate" with cwd
+        args = parser.parse_args(["generate"] + list(argv))
 
     return args.func(args)
 

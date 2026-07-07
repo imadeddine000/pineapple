@@ -17,6 +17,7 @@ that produces standard, human-readable Dockerfiles — and can even build them f
   correct install commands (with pnpm auto-install in the container!)
 - **Multi-stage Dockerfiles**: lean production images with Caddy (static sites),
   node:alpine (SSR/servers), python:3.11-slim, golang:alpine, etc.
+- **Zero-config**: just run `pineapple` in any project — no arguments needed
 - **One-command build**: add `--build` / `-b` to automatically build the container
   image after generating the Dockerfile
 - **Docker verification**: `pineapple verify docker` checks that Docker is installed
@@ -42,7 +43,7 @@ sudo apt install devscripts debhelper dh-python python3-all python3-setuptools
 dpkg-buildpackage -us -uc -b
 
 # Install it
-sudo dpkg -i ../pineapple_1.0.0-1_all.deb
+sudo dpkg -i ../python3-pineapple_1.0.0-1_all.deb
 ```
 
 ### Or just run without installing
@@ -54,39 +55,50 @@ python -m pineapple /path/to/project
 
 ## Usage
 
-### CLI
+### Quickstart — zero arguments
 
 ```bash
-# Basic detection + Dockerfile to stdout
-pineapple ./my-project
+# Just run it in any project folder — it scans ., detects, and writes Dockerfile
+cd /path/to/my-project
+pineapple
+```
 
-# Write Dockerfile to file
-pineapple generate ./my-project --output Dockerfile
+### CLI examples
 
-# Aliases work too
-pineapple gen ./my-project -o Dockerfile
-pineapple g ./my-project -o Dockerfile
+```bash
+# Scan current directory, write Dockerfile (default)
+  pineapple
+  ✓ Scanning /home/user/my-project ...
+  ✓ Detected: express (node-server)
+  ✓ Generating Dockerfile ...
+  ✓ Dockerfile written to ./Dockerfile
 
-# Detect, generate & build in one command
-pineapple ./my-project --build
+# Scan a specific project
+  pineapple ./path/to/project
 
-# Custom image tag
-pineapple ./my-project --build --tag myapp:v1
+# Write to a custom path
+  pineapple -o output/Dockerfile
+  pineapple gen ./project -o ../Dockerfile
 
-# JSON output (for CI/CD pipelines)
-pineapple ./my-project --json
+# Print Dockerfile to stdout (for piping)
+  pineapple --quiet
+  pineapple --quiet > Dockerfile
+
+# JSON detection output (for CI/CD)
+  pineapple --json
+
+# Generate & build in one command
+  pineapple --build
+  pineapple ./project --build --tag myapp:v1
 
 # Explicit framework (skip auto-detection)
-pineapple ./my-project --framework nextjs
+  pineapple -f nextjs
 
 # Verify Docker is available
-pineapple verify docker
-
-# Quiet mode (Dockerfile only, no stderr)
-pineapple ./my-project --quiet --output Dockerfile
+  pineapple verify docker
 
 # Version info
-pineapple --version
+  pineapple --version
 ```
 
 ### As a library

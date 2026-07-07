@@ -5,9 +5,26 @@ Handles running Docker (and in the future Podman) to build images
 from generated Dockerfiles.
 """
 
-import os
 import subprocess
 import sys
+
+
+def _info(message: str, *args: object) -> None:
+    if args:
+        message = message % args
+    print(f"  {message}", file=sys.stderr)
+
+
+def _ok(message: str, *args: object) -> None:
+    if args:
+        message = message % args
+    print(f"  \u2713 {message}", file=sys.stderr)
+
+
+def _err(message: str, *args: object) -> None:
+    if args:
+        message = message % args
+    print(f"  \u2717 {message}", file=sys.stderr)
 
 
 def check_docker() -> int:
@@ -27,31 +44,19 @@ def check_docker() -> int:
         if result.returncode == 0:
             return 0
         else:
-            print(
-                "✗ Docker daemon is not running or not accessible.",
-                file=sys.stderr,
-            )
-            print(f"  {result.stderr.strip()}", file=sys.stderr)
+            _err("Docker daemon is not running or not accessible.")
+            print(f"     {result.stderr.strip()}", file=sys.stderr)
             return 1
     except FileNotFoundError:
-        print(
-            "✗ Docker is not installed.",
-            file=sys.stderr,
-        )
-        print(
-            "  Install it with: sudo apt install docker.io",
-            file=sys.stderr,
-        )
-        print(
-            "  Or visit: https://docs.docker.com/engine/install/",
-            file=sys.stderr,
-        )
+        _err("Docker is not installed.")
+        _info("Install it with: sudo apt install docker.io")
+        _info("Or visit: https://docs.docker.com/engine/install/")
         return 1
     except subprocess.TimeoutExpired:
-        print("✗ Docker info command timed out.", file=sys.stderr)
+        _err("Docker info command timed out.")
         return 1
     except Exception as e:
-        print(f"✗ Unexpected error checking Docker: {e}", file=sys.stderr)
+        _err("Unexpected error checking Docker: %s", e)
         return 1
 
 
@@ -85,10 +90,7 @@ def build_image(
         0 on success, 1 on failure.
     """
     if builder == "podman":
-        print(
-            "Podman build is not yet supported. Use --builder docker.",
-            file=sys.stderr,
-        )
+        _err("Podman build is not yet supported. Use --builder docker.")
         return 1
 
     # Check Docker availability
@@ -103,24 +105,22 @@ def build_image(
     cmd.extend(["-t", tag, project_dir])
 
     if not quiet:
-        print(f"\n→ Building image: {tag}", file=sys.stderr)
-        print(f"  Context: {project_dir}", file=sys.stderr)
-        if dockerfile_path:
-            print(f"  Dockerfile: {dockerfile_path}", file=sys.stderr)
+        _info("Building image: %s", tag)
+        _info("Context: %s", project_dir)
         print(file=sys.stderr)
 
     try:
         result = subprocess.run(cmd)
         if result.returncode == 0:
             if not quiet:
-                print(f"\n✓ Successfully built {tag}", file=sys.stderr)
+                _ok("Successfully built %s", tag)
             return 0
         else:
-            print(f"\n✗ Build failed for {tag}", file=sys.stderr)
+            _err("Build failed for %s", tag)
             return result.returncode
     except FileNotFoundError:
-        print("✗ Docker binary not found.", file=sys.stderr)
+        _err("Docker binary not found.")
         return 1
     except Exception as e:
-        print(f"✗ Build error: {e}", file=sys.stderr)
+        _err("Build error: %s", e)
         return 1
