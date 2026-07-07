@@ -11,3 +11,17 @@ venv/
 *.deb
 *.whl
 .DS_Store
+
+# Debian build artifacts
+.pybuild/
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/python3-pineapple/
+debian/pineapple/
+debian/*.postinst.debhelper
+debian/*.prerm.debhelper
+../*.deb
+../*.buildinfo
+../*.changes

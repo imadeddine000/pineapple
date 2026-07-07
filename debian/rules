@@ -1,8 +1,16 @@
 #!/usr/bin/make -f
 
+export PYBUILD_NAME = pineapple
+
 %:
-	dh $@ --with python3
+	dh $@ --with python3 --buildsystem=pybuild
 
 override_dh_auto_clean:
-	rm -rf *.egg-info
-	dh_auto_clean
+	rm -rf *.egg-info src/*.egg-info
+	pybuild --clean
+
+override_dh_auto_build:
+	pybuild --build
+
+override_dh_auto_install:
+	pybuild --install

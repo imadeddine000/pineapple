@@ -6,7 +6,7 @@ Build-Depends: debhelper-compat (= 13), dh-python, python3-all, python3-setuptoo
 Standards-Version: 4.6.2
 Homepage: https://github.com/your-username/pineapple
 
-Package: pineapple
+Package: python3-pineapple
 Architecture: all
 Depends: ${python3:Depends}, ${misc:Depends}
 Recommends: docker.io
