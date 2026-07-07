@@ -1,0 +1,10 @@
+pineapple (1.0.0-1) unstable; urgency=medium
+
+  * Initial release.
+  * Framework detection for 23+ frameworks.
+  * Dockerfile generation with multi-stage builds.
+  * Optional automatic Docker build (--build / -b flag).
+  * Docker daemon verification (pineapple verify docker).
+  * Rich CLI with generate and verify subcommands.
+
+ -- OctoFlow <octoflow@example.com>  Mon, 07 Jul 2026 22:00:00 +0000

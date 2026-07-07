@@ -1,0 +1,23 @@
+Source: pineapple
+Section: utils
+Priority: optional
+Maintainer: OctoFlow <octoflow@example.com>
+Build-Depends: debhelper-compat (= 13), dh-python, python3-all, python3-setuptools
+Standards-Version: 4.6.2
+Homepage: https://github.com/your-username/pineapple
+
+Package: pineapple
+Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}
+Recommends: docker.io
+Description: Smart framework detection, Dockerfile generation & container builds
+ Scans any project directory, detects the framework and language,
+ and generates a production-ready multi-stage Dockerfile — zero
+ dependencies, pure Python stdlib.
+ .
+ Features:
+  * 23+ frameworks detected (Next.js, Vite, Django, FastAPI, Go, Rust, etc.)
+  * Package manager aware (pnpm, yarn, npm)
+  * Multi-stage Dockerfiles for lean production images
+  * Build support — automatically build the image after generation
+  * Docker daemon verification via 'pineapple verify docker'
