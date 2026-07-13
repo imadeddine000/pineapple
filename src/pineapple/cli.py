@@ -22,6 +22,7 @@ from pineapple import __version__
 from pineapple.detect import detect_framework
 from pineapple.dockerfile import generate_dockerfile
 from pineapple.builder import build_image, check_docker
+from pineapple.server import run_dashboard
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -175,6 +176,132 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_github_setup(args: argparse.Namespace) -> int:
+    """Interactive setup for GitHub App credentials."""
+    from pineapple.env import get_github_config, save_github_config
+    cfg = get_github_config()
+    print("  GitHub App Setup")
+    print("  " + "=" * 40)
+    print("  Create a GitHub App at https://github.com/settings/apps/new")
+    print("  with callback URL: http://localhost:8765/api/github/callback")
+    print()
+    app_id = input("  App ID: ").strip() or cfg.get("app_id", "")
+    client_id = input("  Client ID: ").strip() or cfg.get("client_id", "")
+    client_secret = input("  Client Secret: ").strip() or cfg.get("client_secret", "")
+    print("  Private Key (PEM) - paste the full key, then Ctrl+D:")
+    print("  " + "-" * 40)
+    import sys
+    private_key_lines = []
+    try:
+        for line in sys.stdin:
+            private_key_lines.append(line)
+    except KeyboardInterrupt:
+        pass
+    private_key = "".join(private_key_lines).strip() or cfg.get("private_key", "")
+    if not all([app_id, client_id, client_secret, private_key]):
+        print("  ✗ All fields are required")
+        return 1
+    save_github_config(app_id, client_id, client_secret, private_key)
+    print(f"  ✓ GitHub App credentials saved to ~/.pineapple/.env")
+    print(f"  Run 'pineapple github connect' to link your GitHub account.")
+    return 0
+
+
+def cmd_github_connect(args: argparse.Namespace) -> int:
+    """Connect a GitHub account by installing the app."""
+    from pineapple.env import get_github_config, has_github_config
+    if not has_github_config():
+        print("  ✗ GitHub App not configured. Run 'pineapple github setup' first.")
+        return 1
+    cfg = get_github_config()
+    import secrets, threading, http.server, json, urllib.request, webbrowser, sys
+    
+    # Start a temporary server for the OAuth callback
+    port = 8765
+    install_data = {}
+    
+    class CallbackHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def do_GET(self):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            inst_id = qs.get("installation_id", [None])[0]
+            if inst_id:
+                install_data["installation_id"] = inst_id
+                self.send_response(200)
+                self.send_header("Content-type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"<html><body><h1>Connected!</h1><p>You can close this tab.</p><script>window.close()</script></body></html>")
+            else:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b"<h1>Error</h1>")
+    
+    # Open the install URL
+    install_url = f"https://github.com/apps/{cfg['client_id']}/installations/new"
+    print(f"  Opening browser to install the GitHub App...")
+    webbrowser.open(install_url)
+    
+    # Start a quick server to catch the callback
+    server = http.server.HTTPServer(("127.0.0.1", port), CallbackHandler)
+    server.timeout = 120
+    print(f"  Waiting for authorization on http://localhost:{port}...")
+    print(f"  (Callback URL must be set to http://localhost:{port}/api/github/callback)")
+    
+    try:
+        while not install_data.get("installation_id"):
+            server.handle_request()
+    except KeyboardInterrupt:
+        print("  Cancelled")
+        return 1
+    
+    inst_id = install_data["installation_id"]
+    print(f"  Installation ID: {inst_id}")
+    
+    # Generate JWT and get installation token
+    import time as _time, base64
+    from cryptography.hazmat.primitives import serialization, hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    
+    now = int(_time.time())
+    headers = {"alg": "RS256", "typ": "JWT"}
+    payload = {"iat": now - 60, "exp": now + 600, "iss": cfg["app_id"]}
+    def _b64(d): return base64.urlsafe_b64encode(d).rstrip(b"=").decode()
+    h = _b64(json.dumps(headers).encode())
+    p = _b64(json.dumps(payload).encode())
+    key = serialization.load_pem_private_key(cfg["private_key"].encode(), password=None)
+    sig = _b64(key.sign(f"{h}.{p}".encode(), padding.PKCS1v15(), hashes.SHA256()))
+    jwt = f"{h}.{p}.{sig}"
+    
+    # Exchange for installation token
+    req = urllib.request.Request(
+        f"https://api.github.com/app/installations/{inst_id}/access_tokens",
+        data=b"", method="POST",
+        headers={"Authorization": f"Bearer {jwt}", "Accept": "application/vnd.github.v3+json", "User-Agent": "pineapple"},
+    )
+    resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
+    token = resp.get("token")
+    if not token:
+        print(f"  ✗ Failed to get token: {resp}")
+        return 1
+    
+    # Get account name
+    req2 = urllib.request.Request(
+        "https://api.github.com/installation/repositories",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json", "User-Agent": "pineapple"},
+    )
+    data = json.loads(urllib.request.urlopen(req2, timeout=10).read())
+    repos = data.get("repositories", [])
+    account_name = repos[0]["owner"]["login"] if repos else "unknown"
+    
+    # Save to DB
+    from pineapple.db import create_github_account
+    acct = create_github_account(account_name, inst_id, token, now + 3600)
+    print(f"  ✓ Connected as: {account_name}")
+    print(f"  ✓ Access to {len(repos)} repositories")
+    return 0
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     """Handle the ``verify`` subcommand."""
     if args.tool == "docker":
@@ -188,6 +315,14 @@ def cmd_verify(args: argparse.Namespace) -> int:
     else:
         _err("Unknown tool: %s", args.tool)
         return 1
+
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    """Handle the ``dashboard`` subcommand — start the web UI."""
+    return run_dashboard(
+        port=args.port or 8765,
+        open_browser=not args.no_open,
+    )
 
 
 # ── Parser construction ──────────────────────────────────────────────────
@@ -280,6 +415,21 @@ def build_parser() -> argparse.ArgumentParser:
     gen_parser.set_defaults(func=cmd_generate)
 
     # ── verify subcommand ──────────────────────────────────────────────
+    # ── github subcommand ─────────────────────────────────────────────
+    github_parser = subparsers.add_parser(
+        "github",
+        help="Manage GitHub integration",
+        description="Setup and manage GitHub App integration.",
+    )
+    github_sub = github_parser.add_subparsers(dest="github_command", metavar="")
+    
+    setup_parser = github_sub.add_parser("setup", help="Configure GitHub App credentials")
+    setup_parser.set_defaults(func=cmd_github_setup)
+    
+    connect_parser = github_sub.add_parser("connect", help="Connect a GitHub account")
+    connect_parser.set_defaults(func=cmd_github_connect)
+    
+    # ── verify subcommand ──
     verify_parser = subparsers.add_parser(
         "verify",
         help="Check if a container tool (docker/podman) is available",
@@ -295,6 +445,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Container tool to verify",
     )
     verify_parser.set_defaults(func=cmd_verify)
+
+    # ── dashboard subcommand ────────────────────────────────────────────
+    dashboard_parser = subparsers.add_parser(
+        "dashboard",
+        help="Open the pineapple web dashboard",
+        description="Start a local web server with a GUI for detection, Dockerfile generation, and builds.",
+        epilog="Examples:\n"
+        "  pineapple dashboard\n"
+        "  pineapple dashboard --port 8765\n"
+        "  pineapple dashboard --no-open",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    dashboard_parser.add_argument(
+        "--port", "-p",
+        type=int,
+        default=8765,
+        help="Port to bind (default: 8765, auto-finds next free if busy)",
+    )
+    dashboard_parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Don't automatically open the browser",
+    )
+    dashboard_parser.set_defaults(func=cmd_dashboard)
 
     return parser
 
@@ -342,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
         argv = ["generate"]
 
     first = argv[0]
-    subcommands = {"generate", "gen", "g", "verify"}
+    subcommands = {"generate", "gen", "g", "verify", "dashboard", "github"}
 
     # ── If first arg is not a subcommand, assume generate ───────────────
     if first not in subcommands:

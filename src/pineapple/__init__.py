@@ -10,6 +10,7 @@ Usage:
     pineapple generate /path/to/project --output Dockerfile
     pineapple generate /path/to/project --build
     pineapple verify docker
+    pineapple dashboard               # Open web dashboard
     pineapple --version
 """
 

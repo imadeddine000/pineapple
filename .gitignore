@@ -1,16 +1,33 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.egg-info/
 dist/
 build/
 *.egg
-.tox/
+
+# Virtual environments
 .venv/
 venv/
-*.deb
-*.whl
+env/
+
+# Dependencies
+node_modules/
+
+# Frontend build
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
 
 # Debian build artifacts
 .pybuild/
@@ -25,3 +42,19 @@ debian/*.prerm.debhelper
 ../*.deb
 ../*.buildinfo
 ../*.changes
+../*.dsc
+../*.tar.*
+
+# Environment
+.env
+*.env.local
+
+# Project data (user-specific)
+~/.pineapple/
+
+# Logs
+*.log
+
+# Temp clones
+/tmp/pineapple-clones/
+/tmp/pineapple-test-*
