@@ -1,9 +1,36 @@
 # Development
 
-## One command to start everything
+## Quick Start — One-time setup
 
 ```bash
-cd /home/madeb/pineapple
+make dev-install
+```
+
+This creates a virtual environment and installs pineapple in editable mode.
+After that, just use `./pineapple` from the project root:
+
+```bash
+./pineapple --help
+./pineapple generate . --framework vite --quiet
+./pineapple verify docker
+./pineapple dashboard --no-open
+```
+
+To use `pineapple` from **anywhere** (not just the project root), add this to your `~/.bashrc`:
+```bash
+export PATH=$PATH:/home/madeb/pineapple
+```
+Then:
+```bash
+pineapple --version
+cd /some/project && pineapple
+```
+
+Changes to `src/pineapple/*.py` are picked up **immediately** — no rebuild needed.
+
+## Dev environment with dashboard
+
+```bash
 make dev
 ```
 
@@ -18,7 +45,7 @@ Open **http://localhost:5173** in your browser — it proxies `/api/*` to the ba
 ### Terminal 1 — Backend
 ```bash
 cd /home/madeb/pineapple
-PYTHONPATH=src python3 -m pineapple dashboard
+./pineapple dashboard
 # Ctrl+C → up-arrow → Enter to restart after edits
 ```
 
@@ -29,23 +56,18 @@ npm run dev
 # Auto-reloads on any file change
 ```
 
-## Workflow
+## Testing
 
-| You do | What happens |
-|--------|-------------|
-| Edit a `.py` file | Backend auto-restarts (via `make dev`) |
-| Edit a `.jsx`/`.css` | Browser updates instantly (Vite HMR) |
-| Add a new API route | Backend restarts, frontend picks it up |
+```bash
+make smoke       # Quick CLI smoke test (15 tests, no network)
+make test        # Full test suite (clone + detection + API)
+```
 
 ## Other commands
 
 ```bash
-make test       # Run test suite
-make frontend   # Frontend dev server only
-make backend    # Backend with auto-restart
-make build-deb  # Build .deb package
-
-# GitHub CLI (no dashboard needed)
-PYTHONPATH=src python3 -m pineapple github setup
-PYTHONPATH=src python3 -m pineapple github connect
+make frontend    # Frontend dev server only
+make backend     # Backend with auto-restart
+make build-deb   # Build .deb package
+make clean       # Remove venv + build artifacts
 ```
