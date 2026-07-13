@@ -6,9 +6,11 @@ Usage:
     pineapple ./project                  Scan ./project, write Dockerfile
     pineapple --build                    Scan ., generate & build
     pineapple --json                     Print detection as JSON to stdout
-    pineapple --json output.json         Print detection as JSON to file
+    pineapple --json file.json           Print detection as JSON to file
     pineapple --quiet                    Print Dockerfile to stdout
     pineapple verify docker              Check Docker availability
+    pineapple dashboard                  Open web dashboard
+    pineapple github setup               Configure GitHub App credentials
     pineapple --version / -v / version   Show version
     pineapple --help / -h                Show this help
 """
@@ -49,22 +51,6 @@ def _err(message: str, *args: object) -> None:
     if args:
         message = message % args
     print(f"  \u2717 {message}", file=sys.stderr)
-
-
-# ── Known generate flags (for top-level forwarding) ───────────────────────
-# Any flag not in this set is treated as a generate subcommand flag
-
-def _is_generate_flag(arg: str) -> bool:
-    """Check if an arg looks like a flag that belongs to the generate subcommand."""
-    if not arg.startswith("-"):
-        return False
-    # Strip leading dashes and =value suffix
-    name = arg.lstrip("-").split("=")[0]
-    # These are parsed at the top level
-    if name in {"h", "-help", "v", "-version"}:
-        return False
-    # Everything else is a generate flag
-    return True
 
 
 # ── Subcommand handlers ──────────────────────────────────────────────────
@@ -176,129 +162,81 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_github_setup(args: argparse.Namespace) -> int:
-    """Interactive setup for GitHub App credentials."""
+def cmd_github_config(args: argparse.Namespace) -> int:
+    """
+    Configure GitHub App credentials.
+
+    Credentials are stored in ~/.pineapple/.env for later use
+    (webhook registration, auto-deploy, etc.).
+    """
     from pineapple.env import get_github_config, save_github_config
+
     cfg = get_github_config()
-    print("  GitHub App Setup")
+
+    print("  GitHub App Configuration")
     print("  " + "=" * 40)
-    print("  Create a GitHub App at https://github.com/settings/apps/new")
-    print("  with callback URL: http://localhost:8765/api/github/callback")
     print()
-    app_id = input("  App ID: ").strip() or cfg.get("app_id", "")
-    client_id = input("  Client ID: ").strip() or cfg.get("client_id", "")
-    client_secret = input("  Client Secret: ").strip() or cfg.get("client_secret", "")
-    print("  Private Key (PEM) - paste the full key, then Ctrl+D:")
-    print("  " + "-" * 40)
-    import sys
-    private_key_lines = []
-    try:
-        for line in sys.stdin:
-            private_key_lines.append(line)
-    except KeyboardInterrupt:
-        pass
-    private_key = "".join(private_key_lines).strip() or cfg.get("private_key", "")
-    if not all([app_id, client_id, client_secret, private_key]):
-        print("  ✗ All fields are required")
+    print("  Create a GitHub App at https://github.com/settings/apps/new")
+    print()
+    print("  Required fields:")
+    print("    - App ID (numeric)")
+    print("    - Client ID")
+    print("    - Client secret")
+    print("    - Private key (PEM file)")
+    print()
+
+    # Read private key if --private-key-file was given
+    private_key = cfg.get("private_key", "")
+    if args.private_key_file:
+        try:
+            with open(args.private_key_file) as f:
+                private_key = f.read()
+            _ok("Read private key from %s", args.private_key_file)
+        except FileNotFoundError:
+            _err("File not found: %s", args.private_key_file)
+            return 1
+        except Exception as e:
+            _err("Error reading private key: %s", e)
+            return 1
+
+    app_id = input(f"  App ID [{cfg.get('app_id', '')}]: ").strip() or cfg.get("app_id", "")
+    if not app_id:
+        _err("App ID is required")
         return 1
+
+    client_id = input(f"  Client ID [{cfg.get('client_id', '')}]: ").strip() or cfg.get("client_id", "")
+    if not client_id:
+        _err("Client ID is required")
+        return 1
+
+    client_secret = input(f"  Client Secret [{cfg.get('client_secret', '')[:4]}...]: ").strip() or cfg.get("client_secret", "")
+    if not client_secret:
+        _err("Client Secret is required")
+        return 1
+
+    if not private_key:
+        print("  Private key: paste the full PEM key below (Ctrl+D when done):")
+        print("  " + "-" * 40)
+        private_key_lines = []
+        try:
+            for line in sys.stdin:
+                private_key_lines.append(line)
+        except KeyboardInterrupt:
+            print()
+            _err("Cancelled")
+            return 1
+        private_key = "".join(private_key_lines).strip()
+
+    if not private_key:
+        _err("Private key is required")
+        return 1
+
     save_github_config(app_id, client_id, client_secret, private_key)
-    print(f"  ✓ GitHub App credentials saved to ~/.pineapple/.env")
-    print(f"  Run 'pineapple github connect' to link your GitHub account.")
-    return 0
-
-
-def cmd_github_connect(args: argparse.Namespace) -> int:
-    """Connect a GitHub account by installing the app."""
-    from pineapple.env import get_github_config, has_github_config
-    if not has_github_config():
-        print("  ✗ GitHub App not configured. Run 'pineapple github setup' first.")
-        return 1
-    cfg = get_github_config()
-    import secrets, threading, http.server, json, urllib.request, webbrowser, sys
-    
-    # Start a temporary server for the OAuth callback
-    port = 8765
-    install_data = {}
-    
-    class CallbackHandler(http.server.BaseHTTPRequestHandler):
-        def log_message(self, *a): pass
-        def do_GET(self):
-            from urllib.parse import urlparse, parse_qs
-            qs = parse_qs(urlparse(self.path).query)
-            inst_id = qs.get("installation_id", [None])[0]
-            if inst_id:
-                install_data["installation_id"] = inst_id
-                self.send_response(200)
-                self.send_header("Content-type", "text/html")
-                self.end_headers()
-                self.wfile.write(b"<html><body><h1>Connected!</h1><p>You can close this tab.</p><script>window.close()</script></body></html>")
-            else:
-                self.send_response(400)
-                self.end_headers()
-                self.wfile.write(b"<h1>Error</h1>")
-    
-    # Open the install URL
-    install_url = f"https://github.com/apps/{cfg['client_id']}/installations/new"
-    print(f"  Opening browser to install the GitHub App...")
-    webbrowser.open(install_url)
-    
-    # Start a quick server to catch the callback
-    server = http.server.HTTPServer(("127.0.0.1", port), CallbackHandler)
-    server.timeout = 120
-    print(f"  Waiting for authorization on http://localhost:{port}...")
-    print(f"  (Callback URL must be set to http://localhost:{port}/api/github/callback)")
-    
-    try:
-        while not install_data.get("installation_id"):
-            server.handle_request()
-    except KeyboardInterrupt:
-        print("  Cancelled")
-        return 1
-    
-    inst_id = install_data["installation_id"]
-    print(f"  Installation ID: {inst_id}")
-    
-    # Generate JWT and get installation token
-    import time as _time, base64
-    from cryptography.hazmat.primitives import serialization, hashes
-    from cryptography.hazmat.primitives.asymmetric import padding
-    
-    now = int(_time.time())
-    headers = {"alg": "RS256", "typ": "JWT"}
-    payload = {"iat": now - 60, "exp": now + 600, "iss": cfg["app_id"]}
-    def _b64(d): return base64.urlsafe_b64encode(d).rstrip(b"=").decode()
-    h = _b64(json.dumps(headers).encode())
-    p = _b64(json.dumps(payload).encode())
-    key = serialization.load_pem_private_key(cfg["private_key"].encode(), password=None)
-    sig = _b64(key.sign(f"{h}.{p}".encode(), padding.PKCS1v15(), hashes.SHA256()))
-    jwt = f"{h}.{p}.{sig}"
-    
-    # Exchange for installation token
-    req = urllib.request.Request(
-        f"https://api.github.com/app/installations/{inst_id}/access_tokens",
-        data=b"", method="POST",
-        headers={"Authorization": f"Bearer {jwt}", "Accept": "application/vnd.github.v3+json", "User-Agent": "pineapple"},
-    )
-    resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
-    token = resp.get("token")
-    if not token:
-        print(f"  ✗ Failed to get token: {resp}")
-        return 1
-    
-    # Get account name
-    req2 = urllib.request.Request(
-        "https://api.github.com/installation/repositories",
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json", "User-Agent": "pineapple"},
-    )
-    data = json.loads(urllib.request.urlopen(req2, timeout=10).read())
-    repos = data.get("repositories", [])
-    account_name = repos[0]["owner"]["login"] if repos else "unknown"
-    
-    # Save to DB
-    from pineapple.db import create_github_account
-    acct = create_github_account(account_name, inst_id, token, now + 3600)
-    print(f"  ✓ Connected as: {account_name}")
-    print(f"  ✓ Access to {len(repos)} repositories")
+    _ok("GitHub App credentials saved to ~/.pineapple/.env")
+    print()
+    _info("Future features (coming soon):")
+    _info("  pineapple github webhook register <repo>   — Register a deploy webhook")
+    _info("  pineapple github webhook listen             — Listen for push events")
     return 0
 
 
@@ -414,22 +352,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gen_parser.set_defaults(func=cmd_generate)
 
-    # ── verify subcommand ──────────────────────────────────────────────
     # ── github subcommand ─────────────────────────────────────────────
     github_parser = subparsers.add_parser(
         "github",
-        help="Manage GitHub integration",
-        description="Setup and manage GitHub App integration.",
+        help="Configure GitHub App integration",
+        description="Configure GitHub App credentials for future webhook / auto-deploy features.",
+        epilog="Examples:\n"
+        "  pineapple github setup                      Interactive config\n"
+        "  pineapple github setup --private-key-file   Config with key file",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     github_sub = github_parser.add_subparsers(dest="github_command", metavar="")
-    
-    setup_parser = github_sub.add_parser("setup", help="Configure GitHub App credentials")
-    setup_parser.set_defaults(func=cmd_github_setup)
-    
-    connect_parser = github_sub.add_parser("connect", help="Connect a GitHub account")
-    connect_parser.set_defaults(func=cmd_github_connect)
-    
-    # ── verify subcommand ──
+
+    config_parser = github_sub.add_parser(
+        "setup", aliases=["config"],
+        help="Configure GitHub App credentials (App ID, client secret, private key)",
+    )
+    config_parser.add_argument(
+        "--private-key-file", "-k",
+        default=None,
+        help="Path to the GitHub App PEM private key file",
+    )
+    config_parser.set_defaults(func=cmd_github_config)
+
+    # ── verify subcommand ──────────────────────────────────────────────
     verify_parser = subparsers.add_parser(
         "verify",
         help="Check if a container tool (docker/podman) is available",
@@ -500,7 +446,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # ── Intercept top-level ``-v`` / ``--version`` at the top level ────
-    # (before any subcommand forwarding, so they work cleanly)
     if argv:
         first = argv[0]
         if first in ("-v", "--version"):

@@ -55,6 +55,9 @@ debian/*.prerm.debhelper
 # Logs
 *.log
 
+# Root-level dev wrapper (created by make dev-install)
+pineapple
+
 # Temp clones
 /tmp/pineapple-clones/
 /tmp/pineapple-test-*

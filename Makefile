@@ -1,4 +1,4 @@
-.PHONY: dev backend frontend test build deb clean
+.PHONY: dev backend frontend test smoke build-deb clean dev-install
 
 # Start full dev environment (backend auto-restart + frontend hot reload)
 dev:
@@ -13,9 +13,33 @@ backend:
 frontend:
 	cd frontend && npm run dev
 
-# Run tests
+# Run full test suite (clone + detection + API)
 test:
 	PYTHONPATH=src python3 tests/test_clone_detect.py
+
+# Quick CLI smoke test (no network, no .deb needed)
+smoke:
+	PYTHONPATH=src python3 scripts/test_cli.py
+
+# ────────────────────────────────────────────────────────────────────────────
+# One-time setup — creates a venv + installs the package in editable mode.
+# After this, you can just run:
+#   ./pineapple <args>
+# from anywhere in the project root, like it's installed via .deb.
+# ────────────────────────────────────────────────────────────────────────────
+dev-install:
+	python3 -m venv .venv
+	.venv/bin/pip install -e .
+	@echo ""
+	@echo "  ✓ Dev environment ready!"
+	@echo ""
+	@echo "  Now test with:"
+	@echo "    ./pineapple --help"
+	@echo "    ./pineapple generate . --framework vite --quiet"
+	@echo "    ./pineapple verify docker"
+	@echo ""
+	@echo "  Or add to your ~/.bashrc for global access:"
+	@echo "    export PATH=\$$PATH:$(CURDIR)"
 
 # Build frontend for production
 build-frontend:
@@ -27,5 +51,5 @@ build-deb: build-frontend
 
 # Clean build artifacts
 clean:
-	rm -rf src/pineapple/static frontend/dist *.egg-info
+	rm -rf .venv src/pineapple/static frontend/dist *.egg-info
 	rm -f ../*.deb ../*.buildinfo ../*.changes ../*.dsc ../*.tar.*
