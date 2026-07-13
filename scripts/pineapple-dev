@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Quick pineapple CLI dev runner — no .deb needed.
+# Usage:
+#   ./scripts/pineapple-dev --help
+#   ./scripts/pineapple-dev generate . --framework vite --quiet
+#   ./scripts/pineapple-dev verify docker
+set -e
+cd "$(dirname "$0")/.."
+exec env PYTHONPATH=src python3 -m pineapple "$@"
